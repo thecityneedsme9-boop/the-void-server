@@ -4,60 +4,84 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 
 const app = express();
-app.use(cors()); 
-
-// 1. THIS FIXES THE 404 FOR GOOD
-app.get('/', (req, res) => {
-    res.status(200).send('The Void Server is ALIVE and routing traffic.');
-});
+app.use(cors());
+app.get('/', (req, res) => res.status(200).send('The Void Engine is flawless and active.'));
 
 const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
 
-// 2. THIS ALLOWS YOUR PC HTML FILE TO CONNECT
-const io = new Server(server, {
-    cors: { origin: "*", methods: ["GET", "POST"] } 
-});
-
-let waitingUser = null; 
+let activeUsers = 0;
+let vanishedChats = 8420; 
+let waitingUser = null;
 
 io.on('connection', (socket) => {
-    
-    socket.on('find_match', (userData) => {
+    activeUsers++;
+    io.emit('stats_update', { activeUsers, vanishedChats });
+
+    socket.on('find_match', (data) => {
+        const karma = data?.localKarma || "5.0";
         if (waitingUser && waitingUser.id !== socket.id) {
-            // Pair them up
-            const roomName = `room_${waitingUser.id}_${socket.id}`;
-            socket.join(roomName);
-            waitingUser.join(roomName);
+            const room = `room_${waitingUser.id}_${socket.id}`;
+            socket.join(room);
+            waitingUser.join(room);
             
-            io.to(roomName).emit('match_found', { flag: '🏳️', karma: '5.0' });
+            io.to(room).emit('match_found', { flag: '🏳️', karma: karma });
             
-            socket.room = roomName;
-            waitingUser.room = roomName;
+            socket.room = room;
+            waitingUser.room = room;
             waitingUser = null; 
         } else {
             waitingUser = socket;
         }
     });
 
-    socket.on('send_message', (text) => {
-        if (socket.room) {
-            socket.to(socket.room).emit('receive_message', text);
-        }
+    // Chat Routing
+    socket.on('send_message', (msg) => {
+        if (socket.room) socket.to(socket.room).emit('receive_message', msg);
     });
 
-    // 3. THIS GUARANTEES THE SHATTER EFFECT TRIGGERS
-    socket.on('disconnect', () => {
-        if (waitingUser && waitingUser.id === socket.id) {
-            waitingUser = null;
-        }
+    socket.on('typing', () => {
+        if (socket.room) socket.to(socket.room).emit('typing');
+    });
+
+    // Extension Logic
+    socket.on('request_extend', () => {
+        if (socket.room) socket.to(socket.room).emit('extend_requested');
+    });
+
+    socket.on('accept_extend', () => {
+        if (socket.room) io.to(socket.room).emit('extend_accepted');
+    });
+
+    // 1v1 Games Routing (RPS & TTT)
+    socket.on('game_action', (actionData) => {
+        if (socket.room) socket.to(socket.room).emit('game_action', actionData);
+    });
+
+    // Disconnect & Shatter Logic
+    socket.on('chat_shattered', () => {
+        vanishedChats++;
+        io.emit('stats_update', { activeUsers, vanishedChats });
+    });
+
+    socket.on('leave_chat', () => {
         if (socket.room) {
             socket.to(socket.room).emit('stranger_disconnected');
+            socket.leave(socket.room);
+            socket.room = null;
         }
+    });
+
+    socket.on('disconnect', () => {
+        activeUsers--;
+        if (waitingUser && waitingUser.id === socket.id) waitingUser = null;
+        if (socket.room) {
+            socket.to(socket.room).emit('stranger_disconnected');
+            vanishedChats++;
+        }
+        io.emit('stats_update', { activeUsers, vanishedChats });
     });
 });
 
-// 4. THIS BINDS TO RENDER'S EXACT PORT
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`The Void is breathing on port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`Void active on ${PORT}`));
