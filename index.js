@@ -5,7 +5,7 @@ const cors = require('cors');
 
 const app = express();
 app.use(cors());
-app.get('/', (req, res) => res.status(200).send('The Void Engine is flawless and active.'));
+app.get('/', (req, res) => res.status(200).send('The Void Engine is active.'));
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
@@ -35,16 +35,15 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Chat Routing
     socket.on('send_message', (msg) => {
         if (socket.room) socket.to(socket.room).emit('receive_message', msg);
     });
 
+    // === TYPING INDICATOR FIX ===
     socket.on('typing', () => {
         if (socket.room) socket.to(socket.room).emit('typing');
     });
 
-    // Extension Logic
     socket.on('request_extend', () => {
         if (socket.room) socket.to(socket.room).emit('extend_requested');
     });
@@ -53,12 +52,12 @@ io.on('connection', (socket) => {
         if (socket.room) io.to(socket.room).emit('extend_accepted');
     });
 
-    // 1v1 Games Routing (RPS & TTT)
+    // Handles Games AND the Reject button logic
     socket.on('game_action', (actionData) => {
         if (socket.room) socket.to(socket.room).emit('game_action', actionData);
     });
 
-    // Disconnect & Shatter Logic
+    // === SHATTER SYNC FIX ===
     socket.on('chat_shattered', () => {
         vanishedChats++;
         io.emit('stats_update', { activeUsers, vanishedChats });
@@ -84,4 +83,4 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Void active on ${PORT}`));
+server.listen(PORT, () => console.log(`Void active on port ${PORT}`));
