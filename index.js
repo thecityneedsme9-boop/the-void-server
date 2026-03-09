@@ -2,40 +2,68 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
+const { instrument } = require('@socket.io/admin-ui'); // The Admin Dashboard
 
 const app = express();
 app.use(cors());
 app.get('/', (req, res) => res.status(200).send('Void Engine Active'));
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
+
+// We use a function for CORS so it allows your website AND the Admin UI perfectly
+const io = new Server(server, { 
+    cors: { 
+        origin: function(origin, callback) { callback(null, true); }, 
+        credentials: true 
+    } 
+});
+
+// Turn on the Admin Dashboard
+instrument(io, {
+    auth: false, // No password for now, keep it simple
+    mode: "development",
+});
 
 let activeUsers = 0;
 let vanishedChats = 8420; 
-let waitingUser = null;
+let waitingPool = []; // The Anti-Rematch Array
 const roomsData = {}; 
 
 io.on('connection', (socket) => {
     activeUsers++;
+    socket.lastPartnerId = null; // Memory of the last person they talked to
+
     io.emit('stats_update', { activeUsers, vanishedChats });
 
     socket.on('find_match', (data) => {
         const karma = data?.localKarma || "5.0";
-        if (waitingUser && waitingUser.id !== socket.id) {
-            const room = `room_${waitingUser.id}_${socket.id}`;
+        
+        // Find someone waiting who is NOT this user, and NOT their last partner
+        const matchIndex = waitingPool.findIndex(user => user.id !== socket.id && user.id !== socket.lastPartnerId);
+
+        if (matchIndex !== -1) {
+            // Match found! Pull them out of the pool
+            const partner = waitingPool.splice(matchIndex, 1)[0];
+            const room = `room_${partner.id}_${socket.id}`;
+            
             socket.join(room);
-            waitingUser.join(room);
+            partner.join(room);
             
             roomsData[room] = { maxChars: 1500, usedChars: 0 };
             
-            // SENDING THE BANGLADESH FLAG BY DEFAULT
+            // Save the memory of this match to prevent instant rematch next time
+            socket.lastPartnerId = partner.id;
+            partner.lastPartnerId = socket.id;
+
             io.to(room).emit('match_found', { flag: '🇧🇩', karma: karma });
             
             socket.room = room;
-            waitingUser.room = room;
-            waitingUser = null; 
+            partner.room = room;
         } else {
-            waitingUser = socket;
+            // Nobody valid is waiting, so join the pool
+            if (!waitingPool.find(u => u.id === socket.id)) {
+                waitingPool.push(socket);
+            }
         }
     });
 
@@ -92,11 +120,15 @@ io.on('connection', (socket) => {
             socket.leave(socket.room);
             socket.room = null;
         }
+        // Remove them from the matchmaking pool if they exit while searching
+        waitingPool = waitingPool.filter(u => u.id !== socket.id);
     });
 
     socket.on('disconnect', () => {
         activeUsers--;
-        if (waitingUser && waitingUser.id === socket.id) waitingUser = null;
+        // Remove them from the pool if they close the tab while searching
+        waitingPool = waitingPool.filter(u => u.id !== socket.id);
+        
         if (socket.room) {
             io.to(socket.room).emit('stranger_disconnected');
             io.to(socket.room).emit('force_shatter');
