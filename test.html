@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>The Void | Anonymous Chat</title>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #030712; --glass-bg: rgba(255, 255, 255, 0.02); --glass-border: rgba(255, 255, 255, 0.05);
+            --text-main: #f8fafc; --text-muted: #64748b; --neon-cyan: #06b6d4; --neon-gold: #fbbf24; --neon-red: #ef4444;
+            --my-bubble: rgba(6, 182, 212, 0.1); --stranger-bubble: rgba(255, 255, 255, 0.05);
+        }
+
+        body.light-theme {
+            --bg-dark: #f8fafc; --glass-bg: rgba(0, 0, 0, 0.03); --glass-border: rgba(0, 0, 0, 0.1);
+            --text-main: #0f172a; --text-muted: #475569; --neon-cyan: #0284c7;
+            --my-bubble: rgba(2, 132, 199, 0.1); --stranger-bubble: rgba(0, 0, 0, 0.05);
+            background-image: radial-gradient(circle at 50% 50%, #e2e8f0 0%, #f8fafc 100%);
+        }
+        body.light-theme h1 { color: #0f172a; text-shadow: none; }
+        body.light-theme .void-portal { box-shadow: 0 0 25px rgba(2, 132, 199, 0.3); border: 1px solid rgba(2, 132, 199, 0.2); background: radial-gradient(circle, #fff 30%, var(--neon-cyan) 100%); }
+        body.light-theme .stat-number, body.light-theme .icon-btn, body.light-theme #chat-input, body.light-theme .system-message { color: #0f172a; }
+        body.light-theme .icon-btn, body.light-theme #chat-input, body.light-theme .system-message { background: rgba(0,0,0,0.05); }
+        body.light-theme .bubble { border-color: rgba(0,0,0,0.1); }
+
+        /* CHANGED: Fixed height for mobile browsers */
+        body { background-color: var(--bg-dark); background-image: radial-gradient(circle at 50% 50%, #0f172a 0%, #030712 100%); color: var(--text-main); font-family: 'Outfit', sans-serif; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; transition: background 0.3s ease, color 0.3s ease; }
+
+        #lobby-screen { flex: 1; display: flex; justify-content: center; align-items: center; animation: fadeIn 1s ease-in; padding: 20px; }
+        .lobby-card { background: var(--glass-bg); backdrop-filter: blur(20px); border: 1px solid var(--glass-border); border-radius: 20px; padding: 40px 25px; width: 100%; max-width: 380px; text-align: center; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.8); }
+
+        .void-portal { width: 90px; height: 90px; margin: 0 auto 20px auto; border-radius: 50%; background: radial-gradient(circle, #000 30%, var(--neon-cyan) 100%); box-shadow: 0 0 25px rgba(6, 182, 212, 0.3), inset 0 0 15px #000; animation: spinPortal 10s linear infinite, pulsePortal 3s ease-in-out infinite alternate; border: 1px solid rgba(6, 182, 212, 0.2); }
+        @keyframes spinPortal { 100% { transform: rotate(360deg); } } @keyframes pulsePortal { 100% { box-shadow: 0 0 40px rgba(6, 182, 212, 0.6), inset 0 0 20px #000; transform: scale(1.02); } }
+
+        h1 { font-family: 'Cinzel', serif; font-size: 2.8rem; font-weight: 800; letter-spacing: 4px; margin-bottom: 5px; color: #ffffff; text-shadow: 0 0 15px rgba(255,255,255,0.2); user-select: none;}
+        .subtitle { font-size: 0.9rem; font-weight: 300; color: var(--text-muted); margin-bottom: 35px; letter-spacing: 1px; }
+
+        .stats-container { display: flex; justify-content: center; gap: 15px; margin-bottom: 35px; }
+        .stat-box { flex: 1; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--glass-border); padding: 12px 5px; border-radius: 12px; }
+        .stat-number { font-size: 1.1rem; font-weight: 500; color: #e2e8f0; display: flex; justify-content: center; align-items: center; gap: 8px; }
+        .stat-label { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; margin-top: 4px; display: block; letter-spacing: 1px; }
+        
+        .dot { width: 8px; height: 8px; background-color: #22c55e; border-radius: 50%; box-shadow: 0 0 8px #22c55e; animation: pulse 2s infinite; transition: background-color 0.3s ease; }
+        @keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+
+        .enter-btn { width: 100%; background: transparent; color: var(--neon-cyan); border: 1px solid var(--neon-cyan); padding: 15px; border-radius: 12px; font-family: 'Outfit', sans-serif; font-size: 1rem; font-weight: 500; cursor: pointer; transition: all 0.3s ease; text-transform: uppercase; letter-spacing: 2px; box-shadow: inset 0 0 10px rgba(6, 182, 212, 0.1); }
+        .enter-btn:hover:not(:disabled) { background: var(--neon-cyan); color: #000; box-shadow: 0 0 20px rgba(6, 182, 212, 0.4); }
+        .enter-btn:disabled { opacity: 0.7; cursor: not-allowed; }
+        .disclaimer { margin-top: 20px; font-size: 0.7rem; font-weight: 300; color: #475569; }
+
+        /* CHANGED: Overflow hidden keeps it strictly bounded */
+        #chat-screen { display: none; flex-direction: column; width: 100%; height: 100%; max-width: 600px; margin: 0 auto; position: relative; animation: fadeIn 0.5s ease-in; overflow: hidden; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* CHANGED: flex-shrink 0 stops the header from hiding */
+        .chat-header { flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; background: var(--glass-bg); backdrop-filter: blur(10px); z-index: 10; }
+        .user-info { display: flex; align-items: center; gap: 10px; }
+        .user-info h2 { font-size: 1.1rem; font-weight: 500; display: flex; align-items: center; gap: 6px; margin: 0; white-space: nowrap; }
+        .karma-score { font-size: 0.8rem; color: var(--neon-gold); background: rgba(0,0,0,0.4); padding: 4px 8px; border-radius: 8px; border: 1px solid rgba(251, 191, 36, 0.15); display: flex; align-items: center; gap: 4px; }
+        .header-actions { display: flex; gap: 12px; align-items: center; }
+        .icon-btn { background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); border-radius: 8px; color: var(--text-main); padding: 8px; cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; }
+        .icon-btn:hover { background: rgba(255,255,255,0.08); }
+
+        .progress-container { flex-shrink: 0; width: 100%; height: 4px; background: rgba(0,0,0,0.5); z-index: 10; }
+        .progress-bar { height: 100%; width: 100%; background: var(--neon-cyan); box-shadow: 0 0 10px var(--neon-cyan); transition: width 0.3s ease, background-color 0.3s ease; }
+
+        /* CHANGED: The only part allowed to scroll */
+        .chat-box { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+        .chat-box::-webkit-scrollbar { display: none; }
+        
+        .system-message { text-align: center; font-size: 0.8rem; font-weight: 300; color: var(--text-muted); background: rgba(0,0,0,0.2); padding: 12px; border-radius: 12px; border: 1px solid var(--glass-border); margin: 5px 0; }
+        .system-message span { color: var(--neon-cyan); font-weight: 500; }
+        .system-message.gold span { color: var(--neon-gold); }
+        
+        .message { display: flex; flex-direction: column; max-width: 82%; animation: slideUp 0.3s ease; }
+        .stranger-msg { align-self: flex-start; }
+        .my-msg { align-self: flex-end; align-items: flex-end; }
+        .bubble { padding: 12px 16px; border-radius: 16px; font-size: 0.95rem; font-weight: 300; line-height: 1.5; border: 1px solid var(--glass-border); word-wrap: break-word; }
+        .stranger-msg .bubble { background: var(--stranger-bubble); border-top-left-radius: 4px; }
+        .my-msg .bubble { background: var(--my-bubble); border-top-right-radius: 4px; border-color: rgba(6, 182, 212, 0.2); }
+        .msg-meta { font-size: 0.7rem; color: #475569; margin-top: 5px; font-weight: 300; }
+        
+        .typing-indicator { display: none; align-self: flex-start; font-size: 0.8rem; color: var(--text-muted); margin-left: 10px; }
+        .typing-indicator span { animation: blink 1.4s infinite; opacity: 0.2; }
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes blink { 0%, 100% { opacity: 0.2; } 50% { opacity: 1; } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        #action-toast { flex-shrink: 0; padding: 10px 20px; text-align: center; display: none; margin-bottom: 5px;}
+        #extend-btn { background: transparent; color: var(--neon-gold); border: 1px solid var(--neon-gold); padding: 8px 16px; border-radius: 20px; font-family: 'Outfit', sans-serif; font-size: 0.85rem; cursor: pointer; transition: 0.3s; box-shadow: inset 0 0 8px rgba(251, 191, 36, 0.2); }
+        #extend-btn:hover { background: var(--neon-gold); color: #000; box-shadow: 0 0 15px rgba(251, 191, 36, 0.5); }
+        #countdown-text { font-family: 'Cinzel', serif; font-size: 1.4rem; color: var(--neon-red); font-weight: bold; animation: pulseRed 1s infinite; display: none; text-shadow: 0 0 10px rgba(239, 68, 68, 0.5); }
+        @keyframes pulseRed { 0% { opacity: 0.6; transform: scale(0.98); } 50% { opacity: 1; transform: scale(1.02); } 100% { opacity: 0.6; transform: scale(0.98); } }
+
+        /* CHANGED: flex-shrink 0 stops the input bar from vanishing. Padding bottom fixes iPhone swipe bar */
+        .chat-footer { flex-shrink: 0; display: flex; gap: 10px; padding: 15px 20px; background: var(--glass-bg); backdrop-filter: blur(10px); border-top: 1px solid var(--glass-border); position: relative; z-index: 10; padding-bottom: max(15px, env(safe-area-inset-bottom)); }
+        #chat-input { flex: 1; background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); padding: 12px 15px; border-radius: 12px; color: var(--text-main); font-family: 'Outfit', sans-serif; font-size: 16px; outline: none; transition: 0.3s; }
+        #chat-input:focus { border-color: rgba(6, 182, 212, 0.5); }
+        .send-btn { background: var(--neon-cyan); color: #000; border: none; padding: 0 18px; border-radius: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+        .send-btn:hover { background: #0891b2; }
+
+        #shatter-overlay { position: absolute; top: 70px; left: 0; right: 0; bottom: 70px; background: rgba(3, 7, 18, 0.85); backdrop-filter: blur(12px); z-index: 20; display: none; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 20px; animation: fadeIn 1s ease forwards; }
+        #shatter-overlay h2 { font-family: 'Cinzel', serif; color: var(--neon-cyan); font-size: 2.2rem; margin-bottom: 5px; letter-spacing: 2px;}
+        #shatter-overlay p { font-size: 0.95rem; color: var(--text-muted); margin-bottom: 25px; }
+        
+        #rating-box { background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); border-radius: 16px; padding: 15px 25px; margin-bottom: 25px; width: 100%; max-width: 250px; }
+        .rating-title { font-size: 0.85rem; color: #94a3b8; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; }
+        .star-container { display: flex; justify-content: center; gap: 8px; direction: row; }
+        .star-btn { background: none; border: none; font-size: 1.8rem; color: rgba(255,255,255,0.1); cursor: pointer; transition: color 0.2s, transform 0.2s; padding: 0; line-height: 1; }
+        .star-btn.active, .star-btn:hover { color: var(--neon-gold); text-shadow: 0 0 10px var(--neon-gold); transform: scale(1.1); }
+        #rating-thanks { display: none; color: var(--neon-gold); font-size: 0.85rem; margin-top: 10px; font-weight: 500; }
+
+        .overlay-buttons { display: flex; flex-direction: column; gap: 15px; width: 100%; max-width: 250px; }
+        .secondary-btn { background: transparent; color: var(--text-muted); border: 1px solid var(--glass-border); padding: 12px; border-radius: 12px; font-family: 'Outfit', sans-serif; font-size: 0.9rem; cursor: pointer; transition: 0.2s; }
+        .secondary-btn:hover { background: rgba(255,255,255,0.05); color: var(--text-main); }
+
+        /* === GAME & ADMIN MODALS === */
+        .game-modal { position: fixed; inset: 0; background: rgba(3,7,18,0.95); z-index: 9999; display: none; flex-direction: column; align-items: center; justify-content: center; backdrop-filter: blur(10px); }
+        .game-btn { background: rgba(255,255,255,0.05); border: 1px solid var(--neon-cyan); color: var(--text-main); padding: 15px 30px; border-radius: 12px; font-size: 1.2rem; cursor: pointer; margin: 10px; width: 80%; max-width: 200px; font-family: 'Outfit'; }
+        .close-game { position: absolute; top: 20px; right: 20px; background: none; border: none; color: white; font-size: 1.5rem; cursor: pointer; z-index: 50;}
+        #ttt-board { display: grid; grid-template-columns: repeat(3, 80px); gap: 10px; margin-top: 20px; }
+        .ttt-cell { width: 80px; height: 80px; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); border-radius: 10px; display: flex; justify-content: center; align-items: center; font-size: 2.5rem; cursor: pointer; color: white; }
+        
+        .admin-stat { font-size: 1.2rem; color: white; margin: 10px 0; font-family: 'Outfit'; }
+        .admin-stat span { color: var(--neon-cyan); font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="lobby-screen">
+        <div class="lobby-card">
+            <div class="void-portal"></div>
+            <h1>THE VOID</h1>
+            <p class="subtitle">1500 characters. Then it shatters.</p>
+            <div class="stats-container">
+                <div class="stat-box"><span class="stat-number"><div class="dot"></div> <span id="active-users-count">...</span></span><span class="stat-label">Active Now</span></div>
+                <div class="stat-box"><span class="stat-number"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg> <span id="vanished-count">...</span></span><span class="stat-label">Vanished</span></div>
+            </div>
+            <button class="enter-btn" id="find-btn">Enter</button>
+            <p class="disclaimer">100% Anonymous. No logs kept.</p>
+            
+            <button id="admin-login-btn" style="margin-top: 15px; background: none; border: 1px solid rgba(255,255,255,0.1); color: var(--text-muted); padding: 5px 15px; border-radius: 8px; font-size: 0.7rem; cursor: pointer; font-family: 'Outfit', sans-serif;">Admin Login</button>
+        </div>
+    </div>
+
+    <div id="chat-screen">
+        <header class="chat-header">
+            <div class="user-info">
+                <div class="dot"></div>
+                <h2>Stranger <span id="stranger-flag">🇧🇩</span></h2>
+                <span class="karma-score"><svg width="12" height="12" viewBox="0 0 24 24" fill="#fbbf24" stroke="#fbbf24" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg> <span id="stranger-karma">5.0</span></span>
+            </div>
+            <div class="header-actions">
+                <button class="icon-btn" id="theme-btn" title="Toggle Theme"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg></button>
+                <button class="icon-btn" id="exit-btn" title="Exit Chat"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></button>
+            </div>
+        </header>
+        
+        <div class="progress-container"><div class="progress-bar" id="char-bar"></div></div>
+
+        <main class="chat-box" id="chat-box">
+            <div class="system-message" id="welcome-msg">
+                A stranger appeared from the void.<br>
+                The connection has <span>1,500 characters</span> before it shatters.
+            </div>
+            <div class="typing-indicator" id="typing-indicator">Stranger is typing<span>.</span><span>.</span><span>.</span></div>
+        </main>
+
+        <div id="action-toast">
+            <button id="extend-btn">Request +500 Chars</button>
+            <div id="countdown-text">Shattering in 5...</div>
+        </div>
+
+        <div id="shatter-overlay">
+            <h2>Shattered</h2>
+            <p>The void has consumed this connection.</p>
+            <div id="rating-box">
+                <div class="rating-title">Rate the Vibe</div>
+                <div class="star-container">
+                    <button class="star-btn" data-val="1">★</button><button class="star-btn" data-val="2">★</button><button class="star-btn" data-val="3">★</button><button class="star-btn" data-val="4">★</button><button class="star-btn" data-val="5">★</button>
+                </div>
+                <div id="rating-thanks">Rating Sent to Stranger!</div>
+            </div>
+            <div class="overlay-buttons">
+                <button class="enter-btn" id="new-stranger-btn">Find New Stranger</button>
+                <button class="secondary-btn" id="return-lobby-btn">Return to Lobby</button>
+            </div>
+        </div>
+
+        <footer class="chat-footer">
+            <button class="icon-btn" id="game-btn" title="Games"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="12" x2="10" y2="12"></line><line x1="8" y1="10" x2="8" y2="14"></line><line x1="15" y1="13" x2="15.01" y2="13"></line><line x1="18" y1="11" x2="18.01" y2="11"></line><rect x="2" y="6" width="20" height="12" rx="2"></rect></svg></button>
+            <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
+            <button class="send-btn" id="send-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></button>
+        </footer>
+    </div>
+
+    <div class="game-modal" id="admin-ui" style="justify-content: flex-start; padding-top: 40px;">
+        <button class="close-game" onclick="document.getElementById('admin-ui').style.display='none'">✖</button>
+        <h2 style="font-family:'Cinzel'; color:var(--neon-red); margin-bottom: 15px; font-size: 1.8rem;">SYSTEM ADMIN</h2>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 92%; max-width: 380px;">
+            <div class="admin-stat" style="font-size: 0.85rem; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 10px;">Online: <span id="ad-total">0</span></div>
+            <div class="admin-stat" style="font-size: 0.85rem; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 10px;">Wait: <span id="ad-wait">0</span></div>
+            <div class="admin-stat" style="font-size: 0.85rem; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 10px;">Rooms: <span id="ad-rooms">0</span></div>
+            <div class="admin-stat" style="font-size: 0.85rem; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 10px;">Vanish: <span id="ad-vanish">0</span></div>
+        </div>
+
+        <div style="width: 92%; max-width: 380px; display: flex; justify-content: space-between; align-items: center; margin: 20px 0 10px 0;">
+            <h3 id="spy-header-text" style="font-size: 0.75rem; color: var(--neon-gold); text-transform: uppercase; letter-spacing: 2px; display: flex; align-items: center; gap: 8px;">
+                <div class="dot" style="width:6px; height:6px;"></div> Global Feed (20)
+            </h3>
+            <button id="spy-unlock-btn" style="display:none; background: var(--neon-red); color: #000; border: none; padding: 4px 10px; border-radius: 6px; font-size: 0.7rem; font-weight: bold; cursor: pointer;">Unlock</button>
+        </div>
+        
+        <p style="font-size: 0.65rem; color: var(--text-muted); margin-bottom: 10px; width: 92%; max-width: 380px;">*Tap any message to lock onto that specific chat room.</p>
+
+        <div id="spy-container" style="width: 92%; max-width: 380px; height: 350px; background: rgba(0,0,0,0.5); border-radius: 15px; border: 1px solid var(--glass-border); padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; scrollbar-width: none;">
+            </div>
+    </div>
+
+    <div class="game-modal" id="game-menu">
+        <button class="close-game" onclick="document.getElementById('game-menu').style.display='none'">✖</button>
+        <h2 style="font-family:'Cinzel'; color:var(--neon-cyan); margin-bottom: 20px;">VOID GAMES</h2>
+        <button class="game-btn" onclick="inviteGame('rps')">Rock Paper Scissors</button>
+        <button class="game-btn" onclick="inviteGame('ttt')">Tic Tac Toe</button>
+    </div>
+
+    <div class="game-modal" id="rps-ui">
+        <h2 style="color:var(--neon-cyan); margin-bottom: 20px;">Choose Weapon</h2>
+        <button class="game-btn" onclick="playRPS('Rock')">✊ Rock</button>
+        <button class="game-btn" onclick="playRPS('Paper')">✋ Paper</button>
+        <button class="game-btn" onclick="playRPS('Scissors')">✌️ Scissors</button>
+        <p id="rps-status" style="margin-top:20px; color:var(--text-muted);"></p>
+    </div>
+
+    <div class="game-modal" id="ttt-ui">
+        <button class="close-game" onclick="document.getElementById('ttt-ui').style.display='none'">✖</button>
+        <h2 style="color:var(--neon-cyan); margin-bottom: 10px;">Tic Tac Toe</h2>
+        <p id="ttt-status" style="color:var(--neon-gold);">Your turn (X)</p>
+        <div id="ttt-board">
+            <div class="ttt-cell" onclick="playTTT(0)"></div><div class="ttt-cell" onclick="playTTT(1)"></div><div class="ttt-cell" onclick="playTTT(2)"></div>
+            <div class="ttt-cell" onclick="playTTT(3)"></div><div class="ttt-cell" onclick="playTTT(4)"></div><div class="ttt-cell" onclick="playTTT(5)"></div>
+            <div class="ttt-cell" onclick="playTTT(6)"></div><div class="ttt-cell" onclick="playTTT(7)"></div><div class="ttt-cell" onclick="playTTT(8)"></div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io("https://the-void-server.onrender.com"); 
+
+        const findBtn = document.getElementById('find-btn');
+        const lobbyScreen = document.getElementById('lobby-screen');
+        const chatScreen = document.getElementById('chat-screen');
+        const exitBtn = document.getElementById('exit-btn');
+        const themeBtn = document.getElementById('theme-btn');
+        const gameBtn = document.getElementById('game-btn');
+        
+        const shatterOverlay = document.getElementById('shatter-overlay');
+        const newStrangerBtn = document.getElementById('new-stranger-btn');
+        const returnLobbyBtn = document.getElementById('return-lobby-btn');
+        
+        const actionToast = document.getElementById('action-toast');
+        const extendBtn = document.getElementById('extend-btn');
+        const countdownText = document.getElementById('countdown-text');
+
+        const chatInput = document.getElementById('chat-input');
+        const sendBtn = document.getElementById('send-btn');
+        const charBar = document.getElementById('char-bar');
+        const chatBox = document.getElementById('chat-box');
+        const typingIndicator = document.getElementById('typing-indicator');
+
+        const starBtns = document.querySelectorAll('.star-btn');
+        const ratingThanks = document.getElementById('rating-thanks');
+
+        let currentMax = 1500; let usedChars = 0; let isCountdownRunning = false; let countdownTimer = null;
+
+        // === PASSWORD PROTECTED ADMIN TRIGGER ===
+        document.getElementById('admin-login-btn').addEventListener('click', () => {
+            const pass = prompt("Enter Admin Password:");
+            if (pass) {
+                socket.emit('get_admin_data', pass);
+            }
+        });
+
+        socket.on('admin_error', () => { alert("Access Denied. Incorrect Password."); });
+
+        socket.on('admin_dashboard', (data) => {
+            document.getElementById('ad-total').innerText = data.totalUsers;
+            document.getElementById('ad-wait').innerText = data.waitingUsers;
+            document.getElementById('ad-rooms').innerText = data.activeRooms;
+            document.getElementById('ad-vanish').innerText = data.totalVanished;
+            document.getElementById('admin-ui').style.display = 'flex';
+        });
+
+        // === TARGET LOCK LOGIC ===
+        const spyContainer = document.getElementById('spy-container');
+        const spyHeaderText = document.getElementById('spy-header-text');
+        const spyUnlockBtn = document.getElementById('spy-unlock-btn');
+        let lockedRoomId = null;
+
+        spyUnlockBtn.addEventListener('click', () => {
+            lockedRoomId = null;
+            spyHeaderText.innerHTML = '<div class="dot" style="width:6px; height:6px;"></div> Global Feed (20)';
+            spyHeaderText.style.color = 'var(--neon-gold)';
+            spyUnlockBtn.style.display = 'none';
+            spyContainer.innerHTML = ''; // Clear feed when switching modes
+        });
+
+        socket.on('spy_feed', (data) => {
+            // If we are locked onto a room, IGNORE messages from other rooms
+            if (lockedRoomId && lockedRoomId !== data.roomId) return;
+
+            const entry = document.createElement('div');
+            entry.style.cssText = "font-size: 0.85rem; color: #e2e8f0; background: rgba(255,255,255,0.04); padding: 10px; border-radius: 8px; border-left: 3px solid var(--neon-cyan); line-height: 1.4; animation: slideUp 0.2s ease; cursor: pointer;";
+            entry.textContent = "💬 " + data.text;
+            
+            // Tap a message to lock onto it
+            entry.addEventListener('click', () => {
+                if (!lockedRoomId) {
+                    lockedRoomId = data.roomId;
+                    spyHeaderText.innerHTML = '<div class="dot" style="width:6px; height:6px; background: var(--neon-red); box-shadow: 0 0 8px var(--neon-red);"></div> [TARGET LOCKED]';
+                    spyHeaderText.style.color = 'var(--neon-red)';
+                    spyUnlockBtn.style.display = 'inline-block';
+                    
+                    // Clear out the rest of the global feed, keep only the clicked message
+                    spyContainer.innerHTML = '';
+                    spyContainer.appendChild(entry);
+                }
+            });
+
+            spyContainer.prepend(entry); 
+
+            if (spyContainer.childNodes.length > 20) {
+                spyContainer.removeChild(spyContainer.lastChild);
+            }
+        });
+
+        themeBtn.addEventListener('click', () => { document.body.classList.toggle('light-theme'); });
+        gameBtn.addEventListener('click', () => { document.getElementById('game-menu').style.display = 'flex'; });
+
+        socket.on('connect', () => { console.log("Connected to Void Engine"); });
+
+        socket.on('stats_update', (data) => {
+            document.getElementById('active-users-count').innerText = data.activeUsers;
+            document.getElementById('vanished-count').innerText = data.vanishedChats;
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+            if (sessionStorage.getItem('void_auto_search') === 'true') {
+                sessionStorage.removeItem('void_auto_search');
+                setTimeout(() => findBtn.click(), 300);
+            }
+        });
+
+        findBtn.addEventListener('click', () => {
+            findBtn.innerText = "Drifting into the void...";
+            findBtn.style.background = "rgba(6, 182, 212, 0.1)";
+            findBtn.style.color = "#06b6d4";
+            findBtn.disabled = true;
+            let myKarma = localStorage.getItem('void_karma') || "5.0";
+            socket.emit('find_match', { localKarma: myKarma });
+        });
+
+        socket.on('match_found', (strangerData) => { 
+            lobbyScreen.style.display = 'none';
+            chatScreen.style.display = 'flex';
+            document.getElementById('stranger-karma').innerText = strangerData.karma;
+            document.getElementById('stranger-flag').innerText = strangerData.flag || "🇧🇩";
+            chatInput.maxLength = currentMax - usedChars;
+        });
+
+        socket.on('sync_chars', (data) => {
+            currentMax = data.max; usedChars = data.used; updateVisualBar(usedChars);
+        });
+
+        chatInput.addEventListener('input', () => { socket.emit('typing'); });
+
+        function updateVisualBar(total) {
+            let remaining = currentMax - total;
+            let percentage = (remaining / currentMax) * 100;
+            if (percentage < 0) percentage = 0; 
+            charBar.style.width = `${percentage}%`;
+            
+            if (remaining <= 0) chatInput.disabled = true;
+            chatInput.maxLength = remaining;
+
+            if (remaining <= 300 && currentMax === 1500 && !isCountdownRunning && total > 0) {
+                actionToast.style.display = 'block'; extendBtn.style.display = 'inline-block'; countdownText.style.display = 'none';
+            }
+
+            if (percentage < 20) {
+                charBar.style.backgroundColor = 'var(--neon-red)'; charBar.style.boxShadow = '0 0 10px var(--neon-red)';
+            } else {
+                charBar.style.backgroundColor = 'var(--neon-cyan)'; charBar.style.boxShadow = '0 0 10px var(--neon-cyan)';
+            }
+        }
+
+        sendBtn.addEventListener('click', sendLocalMessage);
+        chatInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendLocalMessage(); });
+
+        function sendLocalMessage() {
+            const rawText = chatInput.value; const textToDisplay = rawText.trim();
+            if (textToDisplay === '') return;
+            usedChars += rawText.length;
+            appendMessageUI(textToDisplay, 'my-msg');
+            chatInput.value = ''; updateVisualBar(usedChars);
+            socket.emit('send_message', textToDisplay);
+        }
+
+        socket.on('receive_message', (text) => {
+            typingIndicator.style.display = 'none'; appendMessageUI(text, 'stranger-msg');
+        });
+
+        let typingTimeout;
+        socket.on('typing', () => {
+            typingIndicator.style.display = 'flex'; chatBox.appendChild(typingIndicator); chatBox.scrollTop = chatBox.scrollHeight;
+            clearTimeout(typingTimeout); typingTimeout = setTimeout(() => typingIndicator.style.display = 'none', 1500);
+        });
+
+        function appendMessageUI(text, type) {
+            const msgDiv = document.createElement('div'); msgDiv.className = `message ${type}`;
+            const timeString = `${new Date().getHours()}:${new Date().getMinutes().toString().padStart(2, '0')}`;
+            const metaHtml = type === 'my-msg' ? `${timeString} ✓` : timeString;
+            msgDiv.innerHTML = `<div class="bubble"></div><div class="msg-meta">${metaHtml}</div>`;
+            msgDiv.querySelector('.bubble').textContent = text;
+            chatBox.insertBefore(msgDiv, typingIndicator); chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function sysMsg(html) {
+            const div = document.createElement('div'); div.className = 'system-message gold'; div.innerHTML = html;
+            chatBox.insertBefore(div, typingIndicator); chatBox.scrollTop = chatBox.scrollHeight; return div;
+        }
+
+        extendBtn.addEventListener('click', () => {
+            extendBtn.innerText = "Waiting..."; extendBtn.disabled = true; extendBtn.style.opacity = '0.6'; socket.emit('request_extend');
+        });
+
+        socket.on('extend_requested', () => {
+            const reqId = 'ext-' + Date.now();
+            sysMsg(`Stranger requested +500 chars. <span id="${reqId}"><button onclick="acceptExtend(this)" style="background:var(--neon-gold); color:#000; border:none; padding:3px 8px; border-radius:5px; cursor:pointer; font-weight:bold; margin-left:10px;">Accept</button></span>`);
+            setTimeout(() => { const span = document.getElementById(reqId); if (span && span.innerHTML.includes('button')) span.innerHTML = "<span style='color:var(--text-muted); font-size:0.7rem; margin-left:5px;'>(Expired)</span>"; }, 30000);
+        });
+
+        window.acceptExtend = (btn) => { btn.parentElement.innerHTML = "<span style='color:var(--neon-cyan); margin-left:10px; font-size:0.8rem;'>(Accepted)</span>"; socket.emit('accept_extend'); }
+
+        socket.on('extend_accepted', (data) => {
+            currentMax = data.max; usedChars = data.used; actionToast.style.display = 'none'; extendBtn.style.display = 'none';
+            chatInput.maxLength = currentMax - usedChars; updateVisualBar(usedChars); sysMsg('Extension Granted! <span>+500 characters</span> added.');
+        });
+
+        socket.on('force_shatter', () => { if(!isCountdownRunning) startCountdown(); });
+
+        function startCountdown() {
+            isCountdownRunning = true; chatInput.disabled = true; chatInput.placeholder = "Time is up...";
+            actionToast.style.display = 'block'; extendBtn.style.display = 'none'; countdownText.style.display = 'block';
+            let secondsLeft = 5; countdownText.innerText = `Shattering in ${secondsLeft}...`;
+            countdownTimer = setInterval(() => {
+                secondsLeft--;
+                if (secondsLeft <= 0) { clearInterval(countdownTimer); triggerVanish(); } 
+                else { countdownText.innerText = `Shattering in ${secondsLeft}...`; }
+            }, 1000);
+        }
+
+        function triggerVanish() {
+            countdownText.innerText = "Shattered."; chatBox.style.opacity = '0.1'; chatBox.style.filter = 'blur(4px)';
+            socket.emit('chat_shattered'); setTimeout(() => { actionToast.style.display = 'none'; shatterOverlay.style.display = 'flex'; }, 800);
+        }
+
+        socket.on('stranger_disconnected', () => { if(!isCountdownRunning) startCountdown(); });
+
+        starBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const rating = parseInt(e.target.getAttribute('data-val')); socket.emit('submit_rating', rating);
+                starBtns.forEach(s => {
+                    if(parseInt(s.getAttribute('data-val')) <= rating) { s.classList.add('active'); } else { s.classList.remove('active'); }
+                    s.style.pointerEvents = 'none';
+                });
+                ratingThanks.style.display = 'block';
+            });
+        });
+
+        socket.on('receive_rating', (newRating) => {
+            let myCurrentKarma = parseFloat(localStorage.getItem('void_karma') || 5.0);
+            let updatedKarma = ((myCurrentKarma + newRating) / 2).toFixed(1);
+            if (updatedKarma < 1.0) updatedKarma = "1.0"; localStorage.setItem('void_karma', updatedKarma);
+        });
+
+        returnLobbyBtn.addEventListener('click', () => { socket.emit('leave_chat'); location.reload(); });
+        exitBtn.addEventListener('click', () => { socket.emit('leave_chat'); location.reload(); });
+        newStrangerBtn.addEventListener('click', () => { socket.emit('leave_chat'); sessionStorage.setItem('void_auto_search', 'true'); location.reload(); });
+
+        window.inviteGame = (gameType) => {
+            document.getElementById('game-menu').style.display = 'none'; sysMsg(`You invited stranger to play ${gameType.toUpperCase()}.`); socket.emit('game_action', { type: 'invite', game: gameType });
+        };
+
+        socket.on('game_action', (data) => {
+            if (data.type === 'invite') {
+                const inviteId = 'inv-' + Date.now();
+                sysMsg(`Stranger wants to play ${data.game.toUpperCase()}. <span id="${inviteId}"><button onclick="acceptGame('${data.game}', this)" style="background:var(--neon-cyan); border:none; border-radius:5px; padding:3px 8px; cursor:pointer; color:#000; font-weight:bold; margin-left:10px;">Accept</button></span>`);
+                setTimeout(() => { const span = document.getElementById(inviteId); if (span && span.innerHTML.includes('button')) span.innerHTML = "<span style='color:var(--text-muted); font-size:0.7rem; margin-left:5px;'>(Expired)</span>"; }, 30000);
+            } else if (data.type === 'accept') { startGame(data.game, true); } 
+            else if (data.type === 'rps_move') { resolveRPS(data.move); } 
+            else if (data.type === 'ttt_move') { receiveTTT(data.index); }
+        });
+
+        window.acceptGame = (gameType, btn) => { btn.parentElement.innerHTML = "<span style='color:var(--neon-cyan); font-size:0.8rem; margin-left:5px;'>(Accepted)</span>"; socket.emit('game_action', { type: 'accept', game: gameType }); startGame(gameType, false); };
+
+        function startGame(gameType, isPlayer1) {
+            if (gameType === 'rps') { myRPS = null; strangerRPS = null; document.getElementById('rps-status').innerText = ""; document.getElementById('rps-ui').style.display = 'flex'; } 
+            else if (gameType === 'ttt') { initTTT(isPlayer1); }
+        }
+
+        let myRPS = null, strangerRPS = null;
+        window.playRPS = (move) => { myRPS = move; document.getElementById('rps-status').innerText = "Waiting for stranger..."; socket.emit('game_action', { type: 'rps_move', move: move }); if (strangerRPS) checkRPSWin(); };
+        function resolveRPS(strangerMove) { strangerRPS = strangerMove; if (myRPS) checkRPSWin(); }
+        function checkRPSWin() {
+            document.getElementById('rps-ui').style.display = 'none'; let res = "You Tied!";
+            if ((myRPS==='Rock' && strangerRPS==='Scissors') || (myRPS==='Paper' && strangerRPS==='Rock') || (myRPS==='Scissors' && strangerRPS==='Paper')) res = "<span style='color:var(--neon-cyan)'>You Won!</span>"; else if (myRPS !== strangerRPS) res = "<span style='color:var(--neon-red)'>You Lost!</span>";
+            sysMsg(`RPS: You (${myRPS}) vs Stranger (${strangerRPS}). <b>${res}</b>`);
+        }
+
+        let tttBoard = [], mySymbol = '', myTurn = false;
+        function initTTT(isPlayer1) { tttBoard = Array(9).fill(''); mySymbol = isPlayer1 ? 'X' : 'O'; myTurn = isPlayer1; document.getElementById('ttt-status').innerText = myTurn ? "Your Turn (" + mySymbol + ")" : "Stranger's Turn"; document.querySelectorAll('.ttt-cell').forEach(c => { c.innerText = ''; c.style.color = 'white'; }); document.getElementById('ttt-ui').style.display = 'flex'; }
+        window.playTTT = (index) => { if (!myTurn || tttBoard[index] !== '') return; makeTTTMove(index, mySymbol); socket.emit('game_action', { type: 'ttt_move', index: index }); myTurn = false; document.getElementById('ttt-status').innerText = "Stranger's Turn"; };
+        function receiveTTT(index) { makeTTTMove(index, mySymbol === 'X' ? 'O' : 'X'); myTurn = true; document.getElementById('ttt-status').innerText = "Your Turn (" + mySymbol + ")"; }
+        function makeTTTMove(index, symbol) { tttBoard[index] = symbol; const cells = document.querySelectorAll('.ttt-cell'); cells[index].innerText = symbol; cells[index].style.color = symbol === 'X' ? 'var(--neon-cyan)' : 'var(--neon-gold)'; checkTTTWin(); }
+        function checkTTTWin() {
+            const wins = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]]; let winner = null;
+            wins.forEach(w => { if(tttBoard[w[0]] && tttBoard[w[0]]===tttBoard[w[1]] && tttBoard[w[0]]===tttBoard[w[2]]) winner = tttBoard[w[0]]; });
+            if (winner) { document.getElementById('ttt-ui').style.display = 'none'; sysMsg(`Tic Tac Toe: <b>${winner === mySymbol ? '<span style="color:var(--neon-cyan)">You Won!</span>' : '<span style="color:var(--neon-red)">Stranger Won!</span>'}</b>`); } 
+            else if (!tttBoard.includes('')) { document.getElementById('ttt-ui').style.display = 'none'; sysMsg(`Tic Tac Toe: <b>It's a Draw!</b>`); }
+        }
+
+        // === ACTIVE/OFFLINE SYSTEM LISTENER ===
+        document.addEventListener("visibilitychange", () => {
+            socket.emit('user_status', document.hidden ? 'offline' : 'online');
+        });
+
+        socket.on('stranger_status', (status) => {
+            const dot = document.querySelector('.user-info .dot');
+            if (status === 'offline') {
+                dot.style.backgroundColor = '#64748b'; // Grey
+                dot.style.boxShadow = 'none';
+            } else {
+                dot.style.backgroundColor = '#22c55e'; // Green
+                dot.style.boxShadow = '0 0 8px #22c55e';
+            }
+        });
+    </script>
+</body>
+              </html>
