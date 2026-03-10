@@ -15,6 +15,8 @@ let vanishedChats = 8420;
 let waitingPool = []; 
 const roomsData = {}; 
 
+let adminHistory = []; 
+
 io.on('connection', (socket) => {
     activeUsers++;
     socket.lastPartnerId = null; 
@@ -22,7 +24,6 @@ io.on('connection', (socket) => {
     
     io.emit('stats_update', { activeUsers, vanishedChats });
 
-    // === ADMIN LOGIN PROTOCOL ===
     socket.on('get_admin_data', (secret) => {
         if (secret.trim() === "Samsung09") {
             socket.isAdmin = true; 
@@ -31,6 +32,9 @@ io.on('connection', (socket) => {
                 waitingUsers: waitingPool.length,
                 activeRooms: Object.keys(roomsData).length,
                 totalVanished: vanishedChats
+            });
+            adminHistory.forEach(m => {
+                socket.emit('spy_feed', { text: m.text, roomId: m.roomId });
             });
         } else {
             socket.emit('admin_error'); 
@@ -48,15 +52,30 @@ io.on('connection', (socket) => {
             socket.join(room);
             partner.join(room);
             
-            roomsData[room] = { maxChars: 1500, usedChars: 0 };
+            roomsData[room] = { maxChars: 1500, usedChars: 0, disconnectTimer: null };
             socket.lastPartnerId = partner.id;
             partner.lastPartnerId = socket.id;
 
-            io.to(room).emit('match_found', { flag: '🇧🇩', karma: karma });
+            // === FIX 1: Send the Hidden Room ID to the clients ===
+            io.to(room).emit('match_found', { flag: '🇧🇩', karma: karma, roomId: room });
             socket.room = room;
             partner.room = room;
         } else {
             if (!waitingPool.find(u => u.id === socket.id)) waitingPool.push(socket);
+        }
+    });
+
+    // === FIX 2: Reclaim Session Protocol for iPhone/Brave Reconnects ===
+    socket.on('reclaim_session', (roomId) => {
+        if (roomsData[roomId]) {
+            socket.join(roomId);
+            socket.room = roomId;
+            // Stop the shatter timer!
+            if (roomsData[roomId].disconnectTimer) {
+                clearTimeout(roomsData[roomId].disconnectTimer);
+                roomsData[roomId].disconnectTimer = null;
+            }
+            socket.to(roomId).emit('stranger_status', 'online');
         }
     });
 
@@ -69,7 +88,10 @@ io.on('connection', (socket) => {
             socket.to(socket.room).emit('receive_message', msg);
             io.to(socket.room).emit('sync_chars', { used, max });
 
-            // === SPY MODE: Send text AND the hidden Room ID ===
+            const msgData = { text: msg, roomId: socket.room };
+            adminHistory.push(msgData);
+            setTimeout(() => { adminHistory = adminHistory.filter(m => m !== msgData); }, 3600000); 
+
             io.sockets.sockets.forEach((s) => {
                 if (s.isAdmin) s.emit('spy_feed', { text: msg, roomId: socket.room });
             });
@@ -90,7 +112,6 @@ io.on('connection', (socket) => {
     socket.on('submit_rating', (rating) => { if (socket.room) socket.to(socket.room).emit('receive_rating', rating); });
     socket.on('chat_shattered', () => { vanishedChats++; io.emit('stats_update', { activeUsers, vanishedChats }); });
     
-    // === ACTIVE/OFFLINE SYSTEM ===
     socket.on('user_status', (status) => {
         if (socket.room) socket.to(socket.room).emit('stranger_status', status);
     });
@@ -114,7 +135,6 @@ io.on('connection', (socket) => {
         if (socket.room && roomsData[socket.room]) {
             socket.to(socket.room).emit('stranger_status', 'offline');
 
-            // === 20 SECOND GRACE PERIOD ===
             roomsData[socket.room].disconnectTimer = setTimeout(() => {
                 if (roomsData[socket.room]) { 
                     io.to(socket.room).emit('stranger_disconnected');
