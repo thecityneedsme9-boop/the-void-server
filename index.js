@@ -112,19 +112,18 @@ io.on('connection', (socket) => {
         io.emit('stats_update', { activeUsers, vanishedChats });
 
         if (socket.room && roomsData[socket.room]) {
-            // Tell partner the user dropped connection
             socket.to(socket.room).emit('stranger_status', 'offline');
 
             // === 20 SECOND GRACE PERIOD ===
             roomsData[socket.room].disconnectTimer = setTimeout(() => {
-                if (roomsData[socket.room]) { // Check if room still exists
+                if (roomsData[socket.room]) { 
                     io.to(socket.room).emit('stranger_disconnected');
                     io.to(socket.room).emit('force_shatter');
                     delete roomsData[socket.room];
                     vanishedChats++;
                     io.emit('stats_update', { activeUsers, vanishedChats });
                 }
-            }, 20000); // 20 seconds
+            }, 20000);
         }
     });
 });
