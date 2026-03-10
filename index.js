@@ -89,6 +89,12 @@ io.on('connection', (socket) => {
     socket.on('game_action', (actionData) => { if (socket.room) socket.to(socket.room).emit('game_action', actionData); });
     socket.on('submit_rating', (rating) => { if (socket.room) socket.to(socket.room).emit('receive_rating', rating); });
     socket.on('chat_shattered', () => { vanishedChats++; io.emit('stats_update', { activeUsers, vanishedChats }); });
+    
+    // === ACTIVE/OFFLINE SYSTEM ===
+    socket.on('user_status', (status) => {
+        if (socket.room) socket.to(socket.room).emit('stranger_status', status);
+    });
+
     socket.on('leave_chat', () => {
         if (socket.room) {
             io.to(socket.room).emit('stranger_disconnected'); 
@@ -99,16 +105,27 @@ io.on('connection', (socket) => {
         }
         waitingPool = waitingPool.filter(u => u.id !== socket.id);
     });
+
     socket.on('disconnect', () => {
         activeUsers--;
         waitingPool = waitingPool.filter(u => u.id !== socket.id);
-        if (socket.room) {
-            io.to(socket.room).emit('stranger_disconnected');
-            io.to(socket.room).emit('force_shatter');
-            delete roomsData[socket.room];
-            vanishedChats++;
-        }
         io.emit('stats_update', { activeUsers, vanishedChats });
+
+        if (socket.room && roomsData[socket.room]) {
+            // Tell partner the user dropped connection
+            socket.to(socket.room).emit('stranger_status', 'offline');
+
+            // === 20 SECOND GRACE PERIOD ===
+            roomsData[socket.room].disconnectTimer = setTimeout(() => {
+                if (roomsData[socket.room]) { // Check if room still exists
+                    io.to(socket.room).emit('stranger_disconnected');
+                    io.to(socket.room).emit('force_shatter');
+                    delete roomsData[socket.room];
+                    vanishedChats++;
+                    io.emit('stats_update', { activeUsers, vanishedChats });
+                }
+            }, 20000); // 20 seconds
+        }
     });
 });
 
