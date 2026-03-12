@@ -56,7 +56,6 @@ io.on('connection', (socket) => {
             socket.lastPartnerId = partner.id;
             partner.lastPartnerId = socket.id;
 
-            // === FIX 1: Send the Hidden Room ID to the clients ===
             io.to(room).emit('match_found', { flag: '🇧🇩', karma: karma, roomId: room });
             socket.room = room;
             partner.room = room;
@@ -65,12 +64,10 @@ io.on('connection', (socket) => {
         }
     });
 
-    // === FIX 2: Reclaim Session Protocol for iPhone/Brave Reconnects ===
     socket.on('reclaim_session', (roomId) => {
         if (roomsData[roomId]) {
             socket.join(roomId);
             socket.room = roomId;
-            // Stop the shatter timer!
             if (roomsData[roomId].disconnectTimer) {
                 clearTimeout(roomsData[roomId].disconnectTimer);
                 roomsData[roomId].disconnectTimer = null;
@@ -80,23 +77,33 @@ io.on('connection', (socket) => {
     });
 
     socket.on('send_message', (msg) => {
+        if (!msg) return; // Safety check
         if (socket.room && roomsData[socket.room]) {
-            roomsData[socket.room].usedChars += msg.length;
+            const textContent = typeof msg === 'string' ? msg : msg.text;
+            if (!textContent) return; // Safety check
+
+            roomsData[socket.room].usedChars += textContent.length;
             const used = roomsData[socket.room].usedChars;
             const max = roomsData[socket.room].maxChars;
             
             socket.to(socket.room).emit('receive_message', msg);
             io.to(socket.room).emit('sync_chars', { used, max });
 
-            const msgData = { text: msg, roomId: socket.room };
+            const msgData = { text: textContent, roomId: socket.room };
             adminHistory.push(msgData);
             setTimeout(() => { adminHistory = adminHistory.filter(m => m !== msgData); }, 3600000); 
 
             io.sockets.sockets.forEach((s) => {
-                if (s.isAdmin) s.emit('spy_feed', { text: msg, roomId: socket.room });
+                if (s.isAdmin) s.emit('spy_feed', { text: textContent, roomId: socket.room });
             });
 
             if (used >= max) io.to(socket.room).emit('force_shatter');
+        }
+    });
+
+    socket.on('react_message', (data) => {
+        if (socket.room && data) {
+            socket.to(socket.room).emit('receive_reaction', data);
         }
     });
 
