@@ -33,6 +33,7 @@ io.on('connection', (socket) => {
                 activeRooms: Object.keys(roomsData).length,
                 totalVanished: vanishedChats
             });
+            // Sends only the last hour of global history immediately
             adminHistory.forEach(m => {
                 socket.emit('spy_feed', { text: m.text, roomId: m.roomId });
             });
@@ -77,10 +78,10 @@ io.on('connection', (socket) => {
     });
 
     socket.on('send_message', (msg) => {
-        if (!msg) return; // Safety check
+        if (!msg) return; 
         if (socket.room && roomsData[socket.room]) {
             const textContent = typeof msg === 'string' ? msg : msg.text;
-            if (!textContent) return; // Safety check
+            if (!textContent) return; 
 
             roomsData[socket.room].usedChars += textContent.length;
             const used = roomsData[socket.room].usedChars;
@@ -89,8 +90,11 @@ io.on('connection', (socket) => {
             socket.to(socket.room).emit('receive_message', msg);
             io.to(socket.room).emit('sync_chars', { used, max });
 
+            // Admin history specifically tracking text and room
             const msgData = { text: textContent, roomId: socket.room };
             adminHistory.push(msgData);
+            
+            // Backend 1-Hour Auto-Delete
             setTimeout(() => { adminHistory = adminHistory.filter(m => m !== msgData); }, 3600000); 
 
             io.sockets.sockets.forEach((s) => {
