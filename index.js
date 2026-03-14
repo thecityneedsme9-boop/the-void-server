@@ -238,6 +238,7 @@ io.on('connection', (socket) => {
     // === UTILITIES ===
     socket.on('react_message', (data) => { if (socket.room) socket.to(socket.room).emit('receive_reaction', data); });
     socket.on('typing', () => { if (socket.room && socket.room !== 'the_nexus') socket.to(socket.room).emit('typing'); });
+    socket.on('user_status', (status) => { if (socket.room && socket.room !== 'the_nexus') socket.to(socket.room).emit('stranger_status', status); });
     socket.on('request_extend', () => { if (socket.room && socket.room !== 'the_nexus') socket.to(socket.room).emit('extend_requested'); });
     socket.on('accept_extend', () => {
         if (socket.room && roomsData[socket.room]) {
