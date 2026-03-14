@@ -16,19 +16,20 @@ let activeUsers = 0;
 let vanishedChats = 8420; 
 let waitingPool = []; 
 const roomsData = {}; 
+
+let adminHistory = []; 
 let globalHistory = []; 
 const ipPhotoLimits = {}; 
+const activeGameInvites = new Set(); // Tracks Global Games
 
-// Clean The Nexus RAM every 5 mins (2-hour limit)
+// Clean RAM
 setInterval(() => {
     const twoHoursAgo = Date.now() - 7200000;
     globalHistory = globalHistory.filter(m => m.time > twoHoursAgo);
+    adminHistory = adminHistory.filter(m => m.time > twoHoursAgo);
 }, 300000);
 
-// Clear IP limits daily
-setInterval(() => { 
-    for (let ip in ipPhotoLimits) delete ipPhotoLimits[ip]; 
-}, 86400000);
+setInterval(() => { for (let ip in ipPhotoLimits) delete ipPhotoLimits[ip]; }, 86400000);
 
 io.on('connection', (socket) => {
     activeUsers++;
@@ -36,6 +37,7 @@ io.on('connection', (socket) => {
     socket.isNoctyx = false;
     socket.alias = "Node-" + Math.floor(Math.random() * 9999);
     socket.lastGlobalSend = 0; 
+    socket.karma = "5.0";
     
     const userIp = socket.handshake.headers["x-forwarded-for"]?.split(',')[0] || socket.handshake.address;
     socket.userIp = userIp;
@@ -52,7 +54,7 @@ io.on('connection', (socket) => {
                 activeRooms: Object.keys(roomsData).length,
                 totalVanished: vanishedChats
             });
-            globalHistory.forEach(m => socket.emit('spy_feed', m));
+            adminHistory.forEach(m => socket.emit('spy_feed', m));
         } else { socket.emit('admin_error'); }
     });
 
@@ -108,44 +110,68 @@ io.on('connection', (socket) => {
             title: data.title || null,
             artist: data.artist || null,
             replyTo: data.replyTo || null,
-            roomId: 'the_nexus'
+            roomId: 'The Nexus'
         };
         
         globalHistory.push(msg);
+        adminHistory.push(msg); 
         io.to('the_nexus').emit('receive_global', msg);
-        
         io.sockets.sockets.forEach((s) => { if (s.isAdmin) s.emit('spy_feed', msg); });
+    });
+
+    // === GLOBAL GAMES (FIRST TO STRIKE) ===
+    socket.on('game_invite_global', (data) => {
+        activeGameInvites.add(data.inviteId);
+        io.to('the_nexus').emit('receive_message', {
+            id: data.inviteId, system: true,
+            text: `<span style="color:var(--neon-cyan)">${socket.alias} challenged the Nexus to ${data.game.toUpperCase()}!</span> <button onclick="window.acceptGlobalGame('${data.inviteId}', '${data.game}', '${socket.id}')" style="background:var(--neon-gold); color:#000; border:none; padding:3px 8px; border-radius:5px; cursor:pointer; font-weight:bold; margin-left:10px; font-family:'Outfit';">Accept Challenge</button>`
+        });
+    });
+
+    socket.on('accept_global_game', (data) => {
+        if(activeGameInvites.has(data.inviteId)) {
+            activeGameInvites.delete(data.inviteId); 
+            const partner = io.sockets.sockets.get(data.fromId);
+            
+            if (partner && partner.room === 'the_nexus') {
+                socket.leave('the_nexus'); partner.leave('the_nexus');
+                const room = `game_${partner.id}_${socket.id}`;
+                socket.join(room); partner.join(room);
+                
+                roomsData[room] = { maxChars: 9999999, usedChars: 0, isInfinite: true };
+                socket.room = room; partner.room = room;
+                
+                io.to(room).emit('match_found', { roomId: room, isPrivateSide: true, isInfinite: true });
+                
+                partner.emit('start_game_directly', { game: data.game, isPlayer1: true });
+                socket.emit('start_game_directly', { game: data.game, isPlayer1: false });
+            }
+        } else {
+            socket.emit('receive_message', { system: true, text: "Challenge was already accepted or expired." });
+        }
     });
 
     // === PRIVATE ROOM INVITE ===
     socket.on('invite_private', (targetAlias) => {
-        socket.to('the_nexus').emit('private_request', { 
-            from: socket.alias, to: targetAlias, fromId: socket.id 
-        });
+        socket.to('the_nexus').emit('private_request', { from: socket.alias, to: targetAlias, fromId: socket.id });
     });
 
     socket.on('accept_private', (data) => {
         const partner = io.sockets.sockets.get(data.fromId);
         if (partner) {
-            socket.leave('the_nexus');
-            partner.leave('the_nexus');
-
+            socket.leave('the_nexus'); partner.leave('the_nexus');
             const room = `private_${partner.id}_${socket.id}`;
-            socket.join(room);
-            partner.join(room);
-            
+            socket.join(room); partner.join(room);
             const isInfinite = socket.isNoctyx || partner.isNoctyx;
             roomsData[room] = { maxChars: isInfinite ? 9999999 : 500, usedChars: 0, isInfinite: isInfinite };
             socket.room = room; partner.room = room;
-            
-            io.to(room).emit('match_found', { 
-                roomId: room, isPrivateSide: true, isInfinite: isInfinite, strangerNoctyx: isInfinite 
-            });
+            io.to(room).emit('match_found', { roomId: room, isPrivateSide: true, isInfinite: isInfinite, strangerNoctyx: isInfinite });
         }
     });
 
     // === 1v1 MATCHMAKING ===
     socket.on('find_match', (data) => {
+        socket.karma = data?.localKarma || "5.0";
         const matchIndex = waitingPool.findIndex(u => u.id !== socket.id);
 
         if (matchIndex !== -1) {
@@ -153,15 +179,13 @@ io.on('connection', (socket) => {
             const room = `room_${partner.id}_${socket.id}`;
             
             socket.join(room); partner.join(room);
-            
             const isInfinite = socket.isNoctyx || partner.isNoctyx;
             roomsData[room] = { maxChars: isInfinite ? 9999999 : 1500, usedChars: 0, isInfinite: isInfinite };
             
             socket.lastPartnerId = partner.id; partner.lastPartnerId = socket.id;
 
-            io.to(room).emit('match_found', { 
-                roomId: room, isPrivateSide: false, isInfinite: isInfinite, strangerNoctyx: socket.isNoctyx || partner.isNoctyx 
-            });
+            socket.emit('match_found', { roomId: room, isPrivateSide: false, isInfinite: isInfinite, strangerNoctyx: partner.isNoctyx, karma: partner.karma, flag: '🇧🇩' });
+            partner.emit('match_found', { roomId: room, isPrivateSide: false, isInfinite: isInfinite, strangerNoctyx: socket.isNoctyx, karma: socket.karma, flag: '🇧🇩' });
             
             socket.room = room; partner.room = room;
         } else {
@@ -195,7 +219,7 @@ io.on('connection', (socket) => {
         }
 
         const msgDataOut = { 
-            ...msg, text: textContent, senderAlias: socket.isNoctyx ? "Noctyx" : "Stranger", isNoctyx: socket.isNoctyx 
+            ...msg, text: textContent, senderAlias: socket.isNoctyx ? "Noctyx" : "Stranger", isNoctyx: socket.isNoctyx, time: Date.now(), roomId: socket.room 
         };
 
         if (isImage || isMusic) { io.to(socket.room).emit('receive_message', msgDataOut); } 
@@ -204,17 +228,15 @@ io.on('connection', (socket) => {
         io.to(socket.room).emit('sync_chars', { used: room.usedChars, max: room.maxChars });
 
         if (!socket.room.startsWith('private_')) {
-            const adminMsg = { ...msgDataOut, roomId: socket.room };
-            io.sockets.sockets.forEach((s) => { if (s.isAdmin) s.emit('spy_feed', adminMsg); });
+            adminHistory.push(msgDataOut);
+            io.sockets.sockets.forEach((s) => { if (s.isAdmin) s.emit('spy_feed', msgDataOut); });
         }
 
-        if (room.usedChars >= room.maxChars && !room.isInfinite) {
-            io.to(socket.room).emit('force_shatter');
-        }
+        if (room.usedChars >= room.maxChars && !room.isInfinite) io.to(socket.room).emit('force_shatter');
     });
 
     // === UTILITIES ===
-    socket.on('react_message', (data) => { if (socket.room && socket.room !== 'the_nexus') socket.to(socket.room).emit('receive_reaction', data); });
+    socket.on('react_message', (data) => { if (socket.room) socket.to(socket.room).emit('receive_reaction', data); });
     socket.on('typing', () => { if (socket.room && socket.room !== 'the_nexus') socket.to(socket.room).emit('typing'); });
     socket.on('request_extend', () => { if (socket.room && socket.room !== 'the_nexus') socket.to(socket.room).emit('extend_requested'); });
     socket.on('accept_extend', () => {
