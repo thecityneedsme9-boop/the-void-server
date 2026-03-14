@@ -19,12 +19,13 @@ const roomsData = {};
 let globalHistory = []; 
 const ipPhotoLimits = {}; 
 
-// Clean Global RAM every 5 mins
+// Clean The Nexus RAM every 5 mins (2-hour limit)
 setInterval(() => {
     const twoHoursAgo = Date.now() - 7200000;
     globalHistory = globalHistory.filter(m => m.time > twoHoursAgo);
 }, 300000);
 
+// Clear IP limits daily
 setInterval(() => { 
     for (let ip in ipPhotoLimits) delete ipPhotoLimits[ip]; 
 }, 86400000);
@@ -33,7 +34,7 @@ io.on('connection', (socket) => {
     activeUsers++;
     socket.lastPartnerId = null;
     socket.isNoctyx = false;
-    socket.alias = "Shadow-" + Math.floor(Math.random() * 9999);
+    socket.alias = "Node-" + Math.floor(Math.random() * 9999);
     socket.lastGlobalSend = 0; 
     
     const userIp = socket.handshake.headers["x-forwarded-for"]?.split(',')[0] || socket.handshake.address;
@@ -63,11 +64,11 @@ io.on('connection', (socket) => {
         } else { socket.emit('auth_failed'); }
     });
 
-    // === GLOBAL CHAT ===
+    // === THE NEXUS (GLOBAL CHAT) ===
     socket.on('join_global', () => {
         waitingPool = waitingPool.filter(u => u.id !== socket.id);
-        socket.join('global_abyss');
-        socket.room = 'global_abyss';
+        socket.join('the_nexus');
+        socket.room = 'the_nexus';
         socket.emit('global_joined', { alias: socket.alias });
         socket.emit('global_history', globalHistory);
     });
@@ -83,7 +84,6 @@ io.on('connection', (socket) => {
         const isMusic = data.type === 'music';
         let textContent = typeof data.text === 'string' ? data.text : "";
 
-        // FLAW FIXED: IP limit for Global Photos
         if (isImage) {
             if (!socket.isNoctyx) {
                 const count = ipPhotoLimits[socket.userIp] || 0;
@@ -108,19 +108,18 @@ io.on('connection', (socket) => {
             title: data.title || null,
             artist: data.artist || null,
             replyTo: data.replyTo || null,
-            roomId: 'global_abyss' // FLAW FIXED: Helps Admin Panel identify room
+            roomId: 'the_nexus'
         };
         
         globalHistory.push(msg);
-        io.to('global_abyss').emit('receive_global', msg);
+        io.to('the_nexus').emit('receive_global', msg);
         
-        // FLAW FIXED: Send global message to Admin Spy Feed too
         io.sockets.sockets.forEach((s) => { if (s.isAdmin) s.emit('spy_feed', msg); });
     });
 
     // === PRIVATE ROOM INVITE ===
     socket.on('invite_private', (targetAlias) => {
-        socket.to('global_abyss').emit('private_request', { 
+        socket.to('the_nexus').emit('private_request', { 
             from: socket.alias, to: targetAlias, fromId: socket.id 
         });
     });
@@ -128,8 +127,8 @@ io.on('connection', (socket) => {
     socket.on('accept_private', (data) => {
         const partner = io.sockets.sockets.get(data.fromId);
         if (partner) {
-            socket.leave('global_abyss');
-            partner.leave('global_abyss');
+            socket.leave('the_nexus');
+            partner.leave('the_nexus');
 
             const room = `private_${partner.id}_${socket.id}`;
             socket.join(room);
@@ -172,7 +171,7 @@ io.on('connection', (socket) => {
 
     // === CORE MESSAGE SYNC ===
     socket.on('send_message', (msg) => {
-        if (!socket.room || socket.room === 'global_abyss' || !roomsData[socket.room]) return;
+        if (!socket.room || socket.room === 'the_nexus' || !roomsData[socket.room]) return;
         
         const room = roomsData[socket.room];
         const isImage = msg.type === 'image';
@@ -215,32 +214,23 @@ io.on('connection', (socket) => {
     });
 
     // === UTILITIES ===
-    socket.on('react_message', (data) => { if (socket.room && socket.room !== 'global_abyss') socket.to(socket.room).emit('receive_reaction', data); });
-    
-    // FLAW FIXED: Typing Indicator hidden in Global
-    socket.on('typing', () => { 
-        if (socket.room && socket.room !== 'global_abyss') socket.to(socket.room).emit('typing'); 
-    });
-    
-    socket.on('request_extend', () => { if (socket.room && socket.room !== 'global_abyss') socket.to(socket.room).emit('extend_requested'); });
+    socket.on('react_message', (data) => { if (socket.room && socket.room !== 'the_nexus') socket.to(socket.room).emit('receive_reaction', data); });
+    socket.on('typing', () => { if (socket.room && socket.room !== 'the_nexus') socket.to(socket.room).emit('typing'); });
+    socket.on('request_extend', () => { if (socket.room && socket.room !== 'the_nexus') socket.to(socket.room).emit('extend_requested'); });
     socket.on('accept_extend', () => {
         if (socket.room && roomsData[socket.room]) {
             roomsData[socket.room].maxChars += 500;
             io.to(socket.room).emit('extend_accepted', { max: roomsData[socket.room].maxChars, used: roomsData[socket.room].usedChars });
         }
     });
-    
-    socket.on('game_action', (data) => { 
-        if (socket.room && socket.room !== 'global_abyss') socket.to(socket.room).emit('game_action', data); 
-    });
-
-    socket.on('submit_rating', (rating) => { if (socket.room && socket.room !== 'global_abyss') socket.to(socket.room).emit('receive_rating', rating); });
+    socket.on('game_action', (data) => { if (socket.room && socket.room !== 'the_nexus') socket.to(socket.room).emit('game_action', data); });
+    socket.on('submit_rating', (rating) => { if (socket.room && socket.room !== 'the_nexus') socket.to(socket.room).emit('receive_rating', rating); });
     socket.on('chat_shattered', () => { vanishedChats++; io.emit('stats_update', { activeUsers, vanishedChats }); });
 
     // === LEAVE & DISCONNECT ===
     socket.on('leave_chat', () => {
         if (socket.room) {
-            if (socket.room !== 'global_abyss') {
+            if (socket.room !== 'the_nexus') {
                 io.to(socket.room).emit('stranger_disconnected'); 
                 io.to(socket.room).emit('force_shatter');
                 if (roomsData[socket.room]) delete roomsData[socket.room]; 
@@ -256,7 +246,7 @@ io.on('connection', (socket) => {
         waitingPool = waitingPool.filter(u => u.id !== socket.id);
         io.emit('stats_update', { activeUsers, vanishedChats });
         
-        if (socket.room && socket.room !== 'global_abyss' && roomsData[socket.room]) {
+        if (socket.room && socket.room !== 'the_nexus' && roomsData[socket.room]) {
             socket.to(socket.room).emit('stranger_status', 'offline');
             roomsData[socket.room].disconnectTimer = setTimeout(() => {
                 if (roomsData[socket.room]) { 
